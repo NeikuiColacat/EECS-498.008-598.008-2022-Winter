@@ -51,7 +51,20 @@ class Conv(object):
         # You are NOT allowed to use anything in torch.nn in other places. #
         ####################################################################
         # Replace "pass" statement with your code
-        pass
+        N , C  , H , W = x.shape
+        F , C , HH , WW = w.shape
+        pad , stride = conv_param['pad'] , conv_param['stride']
+        H_ , W_ = int((H + 2 * pad - HH) / stride + 1) , int((W + 2*pad - WW) / stride + 1)
+
+        x = torch.nn.functional.pad(x , (pad , pad , pad , pad))
+        out = torch.zeros((N , F , H_ , W_) , dtype=x.dtype , device=x.device)
+
+        for n in range(N) :
+            for f in range(F):
+                for h_ in range(H_):
+                    for w_ in range(W_):
+                        out[n,f,h_,w_] = (x[n,:,h_*stride:h_*stride+HH,w_*stride:w_*stride+WW] *w[f]).sum() + b[f]
+
         #####################################################################
         #                          END OF YOUR CODE                         #
         #####################################################################
@@ -76,7 +89,24 @@ class Conv(object):
         # TODO: Implement the convolutional backward pass.            #
         ###############################################################
         # Replace "pass" statement with your code
-        pass
+        x, w, b, conv_param = cache
+        pad, stride = conv_param["pad"], conv_param["stride"]
+        N, F, H_dout, W_dout = dout.shape
+        F , C , HH , WW = w.shape
+
+        db = torch.zeros_like(b)
+        dw = torch.zeros_like(w)
+        dx = torch.zeros_like(x)
+
+        for n in range(N):
+            for f in range(F):
+                for height in range(H_dout):
+                    for width in range(W_dout):
+                        db[f] += dout[n,f,height,width]
+                        dw[f] += x[n,:,height*stride:height*stride+HH,width*stride:width*stride+WW]*dout[n,f,height,width]
+                        dx[n,:,height*stride:height*stride+HH,width*stride:width*stride+WW]+=w[f]*dout[n,f,height,width]
+
+        dx = dx[:,:,1:-1,1:-1]
         ###############################################################
         #                       END OF YOUR CODE                      #
         ###############################################################
@@ -109,7 +139,22 @@ class MaxPool(object):
         # TODO: Implement the max-pooling forward pass                     #
         ####################################################################
         # Replace "pass" statement with your code
-        pass
+
+        N , C , H , W = x.shape
+        pool_height , pool_width = pool_param['pool_height'] , pool_param['pool_width']
+        stride = pool_param['stride']
+
+        HH = 1 + (H - pool_height) // stride
+        WW = 1 + (W - pool_width) // stride
+
+        out = torch.empty((N , C , HH , WW),dtype=x.dtype,device=x.device) 
+        
+        for n in range(N):
+            for c in range(C):
+                for h in range(HH):
+                    for w in range(WW):
+                        out[n,c,h,w] = x[n,c,h*stride:h*stride+pool_height,w*stride:w*stride+pool_width].max() 
+
         ####################################################################
         #                         END OF YOUR CODE                         #
         ####################################################################
@@ -131,7 +176,29 @@ class MaxPool(object):
         # TODO: Implement the max-pooling backward pass                     #
         #####################################################################
         # Replace "pass" statement with your code
-        pass
+
+        x , pool_param = cache
+        N , C , H , W = x.shape
+        pool_height , pool_width = pool_param['pool_height'] , pool_param['pool_width']
+        stride = pool_param['stride']
+
+        HH = 1 + (H - pool_height) // stride
+        WW = 1 + (W - pool_width) // stride
+
+        dx = torch.empty(x.shape , dtype=x.dtype , device = x.device)
+        for n in range(N):
+            for c in range(C):
+                for h in range(HH):
+                    for w in range(WW):
+                        x_slice = x[n , c , h*stride:h*stride+pool_height,w*stride:w*stride+pool_width]
+                        block_shape = x_slice.shape
+                        x_slice = x_slice.reshape(-1)
+
+                        _ , idx = x_slice.max(dim = 0)
+                        dx_slice = torch.zeros_like(x_slice , dtype=x.dtype,device=x.device)
+                        dx_slice[idx] = dout[n,c,h,w]
+                        dx[n , c , h*stride:h*stride+pool_height,w*stride:w*stride+pool_width] = dx_slice.view(block_shape)
+
         ####################################################################
         #                          END OF YOUR CODE                        #
         ####################################################################
@@ -194,7 +261,25 @@ class ThreeLayerConvNet(object):
         # look at the start of the loss() function to see how that happens.  #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        conv_param = {'stride': 1, 'pad': (filter_size - 1) // 2}
+        pool_param = {'pool_height': 2, 'pool_width': 2, 'stride': 2}
+        C,H,W = input_dims
+        HH = filter_size
+        WW =  filter_size
+        H_out_conv = int(1 + (H + 2 * conv_param['pad'] - HH) / conv_param['stride'])
+        W_out_conv = int(1 + (W + 2 * conv_param['pad'] - WW) / conv_param['stride'])
+        H_out = int(1 + (H_out_conv - pool_param['pool_height']) / pool_param['stride'])
+        W_out = int(1 + (W_out_conv - pool_param['pool_width']) / pool_param['stride'])
+
+        self.params['W1'] = weight_scale*torch.randn(num_filters,C, filter_size,filter_size, dtype=dtype,device= device)
+        self.params["b1"] = torch.zeros(num_filters, dtype=dtype, device=device)
+
+        self.params['W2'] = weight_scale*torch.randn(num_filters*H_out*W_out, hidden_dim, dtype=dtype,device= device)
+        self.params["b2"] = torch.zeros(hidden_dim, dtype=dtype, device=device)
+
+        self.params['W3'] = weight_scale*torch.randn(hidden_dim, num_classes, dtype=dtype,device= device)
+        self.params["b3"] = torch.zeros(num_classes, dtype=dtype, device=device)
+
         ######################################################################
         #                            END OF YOUR CODE                        #
         ######################################################################
@@ -243,7 +328,12 @@ class ThreeLayerConvNet(object):
         # above                                                              #
         ######################################################################
         # Replace "pass" statement with your code
-        pass
+        
+        out_crp , cache_crp = Conv_ReLU_Pool.forward(X,self.params['W1'],self.params['b1'],conv_param,pool_param)
+        out_lr , cache_lr = Linear_ReLU.forward(out_crp,self.params['W2'],self.params['b2'])
+        out_l , cache_l = Linear.forward(out_lr,self.params['W3'],self.params['b3'])
+
+        scores = out_l
         ######################################################################
         #                             END OF YOUR CODE                       #
         ######################################################################
@@ -264,7 +354,21 @@ class ThreeLayerConvNet(object):
         # does not include a factor of 0.5                                 #
         ####################################################################
         # Replace "pass" statement with your code
-        pass
+        loss , dout = softmax_loss(scores, y)
+        for i in range(1,4):
+            loss += ( self.params[f'W{i}'] ** 2 ).sum() * self.reg
+        
+        dout , dw , db = Linear.backward(dout,cache_l)
+        grads['W3'] = dw + 2*self.reg*self.params['W3']
+        grads['b3'] = db 
+
+        dout,dw,db = Linear_ReLU.backward(dout,cache_lr)
+        grads['W2'] = dw + 2*self.reg*self.params['W2']
+        grads['b2'] = db 
+
+        dout,dw,db = Conv_ReLU_Pool.backward(dout,cache_crp)
+        grads['W1'] = dw + 2*self.reg*self.params['W1']
+        grads['b1'] = db 
         ###################################################################
         #                             END OF YOUR CODE                    #
         ###################################################################
@@ -348,7 +452,39 @@ class DeepConvNet(object):
         # initilized to ones and zeros respectively.                        #
         #####################################################################
         # Replace "pass" statement with your code
-        pass
+
+        kernel_size , conv_stride , pad = 3 , 1 , 1
+        pool_size , pool_stride = 2 ,2 
+
+        C , H , W = input_dims
+        for i , num_filter in enumerate(num_filters):
+            if self.batchnorm:
+                self.params[f'gamma{i}'] =0.01*torch.randn(num_filter, device =device, dtype = dtype)
+                self.params[f'beta{i}'] = 0.01*torch.randn(num_filter, device =device, dtype = dtype)
+            if weight_scale == 'kaiming':
+                self.params[f'W{i}'] = kaiming_initializer(num_filter,C,K=kernel_size,relu=True,device=device,dtype=dtype)
+            else:
+                self.params[f'W{i}'] = weight_scale * torch.randn(num_filter,C,kernel_size,kernel_size,dtype=dtype,device=device)
+
+            self.params[f'b{i}'] = torch.zeros(num_filter,dtype=dtype,device=device)
+
+            C = num_filter
+
+            H = 1 + (H + 2 * pad - kernel_size) // conv_stride
+            W = 1 + (W + 2 * pad - kernel_size) // conv_stride
+
+            if i in max_pools :
+                H = 1 + (H - pool_size) // pool_stride
+                W = 1 + (W - pool_size) // pool_stride
+
+        i+=1
+        if weight_scale == 'kaiming' :
+            self.params[f'W{i}'] = kaiming_initializer(C*H*W,num_classes,relu=False,dtype=dtype,device=device)
+        else : 
+            self.params[f'W{i}'] = weight_scale * torch.randn(C*H*W,num_classes,dtype=dtype,device=device)
+
+        self.params[f'b{i}'] = torch.zeros(num_classes,dtype=dtype,device=device)
+
         ################################################################
         #                      END OF YOUR CODE                        #
         ################################################################
@@ -361,8 +497,7 @@ class DeepConvNet(object):
         # pass of the second batch normalization layer, etc.
         self.bn_params = []
         if self.batchnorm:
-            self.bn_params = [{'mode': 'train'}
-                              for _ in range(len(num_filters))]
+            self.bn_params = [{"mode": "train"} for _ in range(len(num_filters))]
 
         # Check that we got the right number of parameters
         if not self.batchnorm:
@@ -455,7 +590,41 @@ class DeepConvNet(object):
         # layers, to simplify your implementation.              #
         #########################################################
         # Replace "pass" statement with your code
-        pass
+        cache = {}
+        out = X 
+
+        for i in range(self.num_layers-1):
+            if i in self.max_pools:
+                if self.batchnorm:
+                    out, cache[f"{i}"] = Conv_BatchNorm_ReLU_Pool.forward(
+                        out,
+                        self.params[f"W{i}"],
+                        self.params[f"b{i}"],
+                        self.params[f"gamma{i}"],
+                        self.params[f"beta{i}"],
+                        conv_param,
+                        self.bn_params[i],
+                        pool_param,
+                    )
+                else :
+                    out , cache[f'{i}'] = Conv_ReLU_Pool.forward(out,self.params[f'W{i}'],self.params[f'b{i}'],conv_param,pool_param)
+            else :
+                if self.batchnorm:
+                    out, cache["{}".format(i)] = Conv_BatchNorm_ReLU.forward(
+                        out,
+                        self.params[f"W{i}"],
+                        self.params[f"b{i}"],
+                        self.params[f"gamma{i}"],
+                        self.params[f"beta{i}"],
+                        conv_param,
+                        self.bn_params[i],
+                    )
+                else :
+                    out , cache[f'{i}'] = Conv_ReLU.forward(out,self.params[f'W{i}'],self.params[f'b{i}'],conv_param)
+
+        i+=1
+        out , cache[f'{i}'] = Linear.forward(out,self.params[f'W{i}'],self.params[f'b{i}'])
+        scores = out
         #####################################################
         #                 END OF YOUR CODE                  #
         #####################################################
@@ -476,7 +645,45 @@ class DeepConvNet(object):
         # does not include a factor of 0.5                                #
         ###################################################################
         # Replace "pass" statement with your code
-        pass
+
+        loss , dout = softmax_loss(scores , y)
+        for i in range(self.num_layers):
+            if self.batchnorm and i <= self.num_layers-2:
+                loss+= self.reg*(self.params[f'gamma{i}']**2).sum()
+            loss += (self.params[f'W{i}']**2).sum()*self.reg
+
+        dout , dw , db = Linear.backward(dout,cache[f'{i}'])
+        grads[f'W{i}'] = dw + 2*self.reg*self.params[f'W{i}']
+        grads[f'b{i}'] = db
+
+        for i in range(i-1,-1,-1):
+            if i in self.max_pools:
+                
+                if self.batchnorm:
+                    dout , dw, db, dgamma1,dbetta1  = Conv_BatchNorm_ReLU_Pool.backward(dout, cache[f'{i}'])
+                    grads[f'W{i}'] = dw + 2*self.params[f'W{i}']*self.reg
+                    grads[f'b{i}'] = db
+                    grads[f'beta{i}'] = dbetta1
+                    grads[f'gamma{i}'] = dgamma1 + 2*self.params[f'gamma{i}']*self.reg
+
+                else:
+                    dout , dw , db = Conv_ReLU_Pool.backward(dout,cache[f'{i}'])
+                    grads[f'W{i}'] = dw + 2 * self.reg * self.params[f'W{i}']
+                    grads[f'b{i}'] = db
+            else:
+
+                if self.batchnorm:
+                    dout, dw, db, dgamma1,dbetta1  = Conv_BatchNorm_ReLU.backward(dout, cache[f'{i}'])
+                    grads[f'W{i}'] = dw + 2*self.params[f'W{i}']*self.reg
+                    grads[f'b{i}'] = db
+                    grads[f'beta{i}'] = dbetta1
+                    grads[f'gamma{i}'] = dgamma1 + 2*self.params[f'gamma{i}']*self.reg
+
+                else:
+                    dout , dw , db = Conv_ReLU.backward(dout,cache[f'{i}'])
+                    grads[f'W{i}'] = dw + 2 * self.reg * self.params[f'W{i}']
+                    grads[f'b{i}'] = db
+
         #############################################################
         #                       END OF YOUR CODE                    #
         #############################################################
@@ -485,14 +692,15 @@ class DeepConvNet(object):
 
 
 def find_overfit_parameters():
-    weight_scale = 2e-3   # Experiment with this!
-    learning_rate = 1e-5  # Experiment with this!
+    weight_scale = 1e-1   # Experiment with this!
+    learning_rate = 1e-2  # Experiment with this!
     ###########################################################
     # TODO: Change weight_scale and learning_rate so your     #
     # model achieves 100% training accuracy within 30 epochs. #
     ###########################################################
     # Replace "pass" statement with your code
-    pass
+    weight_scale = 0.1
+    learning_rate = 0.001
     ###########################################################
     #                       END OF YOUR CODE                  #
     ###########################################################
@@ -507,7 +715,31 @@ def create_convolutional_solver_instance(data_dict, dtype, device):
     # CIFAR-10 within 60 seconds.                           #
     #########################################################
     # Replace "pass" statement with your code
-    pass
+    _ , lr = find_overfit_parameters()
+    input_dims = data_dict['X_train'].shape[1:]
+
+    model = DeepConvNet(
+        input_dims=input_dims,
+        num_classes=10,
+        num_filters=[16,32, 64],
+        max_pools=[0 , 1, 2],
+        weight_scale="kaiming",
+        reg=5e-7,
+        dtype=dtype,
+        device=device
+    )
+
+
+    solver = Solver(
+        model,
+        data_dict,
+        num_epochs=200,
+        batch_size=128,
+        update_rule=adam,
+        optim_config={"learning_rate": 3.2e-3},
+        print_every=20,
+        device=device,
+    )
     #########################################################
     #                  END OF YOUR CODE                     #
     #########################################################
@@ -549,7 +781,7 @@ def kaiming_initializer(Din, Dout, K=None, relu=True, device='cpu',
         # and device.                                                     #
         ###################################################################
         # Replace "pass" statement with your code
-        pass
+        weight = gain / Din * torch.randn(Din , Dout , dtype=dtype,device=device)
         ###################################################################
         #                            END OF YOUR CODE                     #
         ###################################################################
@@ -563,7 +795,7 @@ def kaiming_initializer(Din, Dout, K=None, relu=True, device='cpu',
         # and device.                                                     #
         ###################################################################
         # Replace "pass" statement with your code
-        pass
+        weight = gain/(Din*K*K)*torch.randn(Din,Dout,K , K ,dtype=dtype,device=device)
         ###################################################################
         #                         END OF YOUR CODE                        #
         ###################################################################
@@ -652,7 +884,38 @@ class BatchNorm(object):
             # (https://arxiv.org/abs/1502.03167) might prove to be helpful.  #
             ##################################################################
             # Replace "pass" statement with your code
-            pass
+
+            # 1 get cur mean
+            cur_mean = 1./N * torch.sum(x, dim = 0)
+
+            # 2 shift 
+            x_shifted = x - cur_mean 
+
+            ## 3 pw2
+            x_shifted_pw2 = x_shifted ** 2
+
+            ## 4 get var
+            var = 1./N * torch.sum(x_shifted_pw2, dim = 0)
+
+            ## 5 sqrt
+            sqrtvar = torch.sqrt(var + eps)
+
+            ## 6 invert
+            ivar = 1./sqrtvar
+            
+            ## 7 get out put x hat
+            xhat = x_shifted * ivar
+
+            ## 8 add hyper param
+            gammax = gamma * xhat
+
+            out = gammax + beta
+
+            # update running variable
+            running_var = momentum * running_var + (1 - momentum) * var
+            running_mean = momentum * running_mean + (1 - momentum) * cur_mean 
+            cache = (xhat,gamma,x_shifted,ivar,sqrtvar,var,eps) 
+
             ################################################################
             #                           END OF YOUR CODE                   #
             ################################################################
@@ -665,7 +928,8 @@ class BatchNorm(object):
             # in the out variable.                                         #
             ################################################################
             # Replace "pass" statement with your code
-            pass
+            x_normalized = (x - running_mean) / (running_var + eps)**(1/2)
+            out = x_normalized * gamma + beta 
             ################################################################
             #                      END OF YOUR CODE                        #
             ################################################################
@@ -707,7 +971,39 @@ class BatchNorm(object):
         # Don't forget to implement train and test mode separately.         #
         #####################################################################
         # Replace "pass" statement with your code
-        pass
+        xhat,gamma,x_shifted,ivar,sqrtvar,var,eps = cache
+        N , D = dout.shape
+
+        dbeta = dout.sum(dim = 0) 
+
+        dgamma = torch.sum(dout * xhat , dim = 0)
+
+        dxhat = dout * gamma
+
+        divar = torch.sum(dxhat * x_shifted , dim = 0)
+
+        # ivar = sqrtvar ** -1
+        dsqrtvar = -1. / (sqrtvar ** 2) * divar
+        # sqrtvar = var ** (1. / 2)
+        dvar = 0.5 * 1./torch.sqrt(var + eps) * dsqrtvar
+
+
+        ## derivative product rule
+        ## x_hat = x_shifted * ivar
+
+        dx_shifted2 = (
+            2.0 / N * x_shifted * torch.ones((N, D), device=dout.device) * dvar
+        )
+
+        dx_shifted1 = dxhat * ivar
+
+        dx1 = (dx_shifted1 + dx_shifted2) ## differentiate to ivar 
+        
+        dx_shifted = -1 * torch.sum(dx_shifted1 + dx_shifted2 , dim = 0) 
+
+        dx2 = 1. / N * torch.ones((N , D ) , device=dout.device) * dx_shifted # differentiate to x_shifted
+        
+        dx = dx1 + dx2
         #################################################################
         #                      END OF YOUR CODE                         #
         #################################################################
@@ -740,7 +1036,12 @@ class BatchNorm(object):
         # single 80-character line.                                       #
         ###################################################################
         # Replace "pass" statement with your code
-        pass
+        xhat,gamma,x_shifted,ivar,sqrtvar,var,eps = cache
+        N,D = dout.shape
+
+        dbeta = torch.sum(dout, dim=0)
+        dgamma = torch.sum(xhat * dout, dim=0)
+        dx = (gamma*ivar/N) * (N*dout - xhat*dgamma - dbeta)
         #################################################################
         #                        END OF YOUR CODE                       #
         #################################################################
@@ -788,7 +1089,10 @@ class SpatialBatchNorm(object):
         # ours is less than five lines.                                #
         ################################################################
         # Replace "pass" statement with your code
-        pass
+        N,C,H,W = x.shape
+        x_reshaped = x.permute(1,0,2,3).reshape(C,-1).T
+        out , cache = BatchNorm.forward(x_reshaped,gamma,beta,bn_param)
+        out = out.T.reshape(C,N,H,W).permute(1,0,2,3)
         ################################################################
         #                       END OF YOUR CODE                       #
         ################################################################
@@ -819,7 +1123,12 @@ class SpatialBatchNorm(object):
         # ours is less than five lines.                                 #
         #################################################################
         # Replace "pass" statement with your code
-        pass
+        N,C,H,W = dout.shape
+        dout_reshaped = dout.permute(1,0,2,3).reshape(C,-1).T
+
+        dx, dgamma,dbeta= BatchNorm.backward(dout_reshaped,cache)
+        dx = dx.T.reshape(C,N,H,W).permute(1,0,2,3)
+
         ##################################################################
         #                       END OF YOUR CODE                         #
         ##################################################################

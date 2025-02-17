@@ -61,7 +61,18 @@ class RPNPredictionNetwork(nn.Module):
         # `FCOSPredictionNetwork` for this code block.
         stem_rpn = []
         # Replace "pass" statement with your code
-        pass
+        
+        for i , C in enumerate(stem_channels):
+            if i == 0:
+                layer = nn.Conv2d(in_channels, C, 3, padding=1)
+            else:
+                layer = nn.Conv2d(stem_channels[i-1], C, 3, padding=1)
+
+            nn.init.normal_(layer.weight,std=0.01) 
+            nn.init.constant_(layer.bias,val = 0)
+
+            stem_rpn.append(layer)
+            stem_rpn.append(nn.ReLU())
 
         # Wrap the layers defined by student into a `nn.Sequential` module:
         self.stem_rpn = nn.Sequential(*stem_rpn)
@@ -79,7 +90,12 @@ class RPNPredictionNetwork(nn.Module):
         self.pred_box = None  # Box regression conv
 
         # Replace "pass" statement with your code
-        pass
+        self.pred_obj = nn.Conv2d(stem_channels[-1],self.num_anchors,1)
+        self.pred_box = nn.Conv2d(stem_channels[-1],self.num_anchors * 4,1)
+        nn.init.normal_(self.pred_obj.weight,std=0.01)
+        nn.init.normal_(self.pred_box.weight,std=0.01)
+        nn.init.constant_(self.pred_obj.bias,val=0)
+        nn.init.constant_(self.pred_box.bias,val=0)
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -109,9 +125,15 @@ class RPNPredictionNetwork(nn.Module):
         # Fill these with keys: {"p3", "p4", "p5"}, same as input dictionary.
         object_logits = {}
         boxreg_deltas = {}
-
+            
         # Replace "pass" statement with your code
-        pass
+        for key in ['p3','p4','p5']:
+            feat = self.stem_rpn(feats_per_fpn_level[key])
+            B , C , H , W = feat.shape
+            object_logits[key] = self.pred_obj(feat).reshape(B,H*W*self.num_anchors)
+            boxreg_deltas[key] = self.pred_box(feat).reshape(B,H*W*self.num_anchors,4)
+            # boxreg_deltas[key] = self.pred_box(feat).permute(0,2,3,1).reshape(B,H*W*self.num_anchors,4)
+
         ######################################################################
         #                           END OF YOUR CODE                         #
         ######################################################################
@@ -177,7 +199,31 @@ def generate_fpn_anchors(
             # locations to get top-left and bottom-right co-ordinates.
             ##################################################################
             # Replace "pass" statement with your code
-            pass
+
+            # area = (stride_scale * level_stride) ** 2
+            # new_w = math.sqrt(area / aspect_ratio)
+            # new_h = area / new_w 
+
+            # anchor_boxes.append(
+            #     torch.cat(
+            #         (locations[:, 0] - new_w / 2, locations[:, 1] -
+            #          new_h/2, locations[:, 0] + new_w / 2, locations[:, 1] + new_h / 2),
+            #     ).reshape(-1,4)
+            # )
+
+            area = (stride_scale * level_stride) ** 2
+            new_width = (area / aspect_ratio)**0.5
+            new_height = area / new_width
+            # 2. Shift locations by -0.5 width, -0.5 height to get X1Y1 
+            #                       +0.5 width, +0.5 height to get X2Y2 
+            XCYC = locations.repeat(1,2) # make (H*W, 2) =>(H*W, 4)
+            shift_matrix = torch.tensor([- 0.5 * new_width, - 0.5 * new_height,  0.5 * new_width, 0.5 * new_height], device=XCYC.device).reshape(1,-1) # (1, 4)
+            # print("XCYC: ")
+            # print(XCYC)
+            # print(shift_matrix)
+
+            anchor_boxes.append(XCYC + shift_matrix)
+
             ##################################################################
             #                           END OF YOUR CODE                     #
             ##################################################################
@@ -211,7 +257,26 @@ def iou(boxes1: torch.Tensor, boxes2: torch.Tensor) -> torch.Tensor:
     # TODO: Implement the IoU function here.                                 #
     ##########################################################################
     # Replace "pass" statement with your code
-    pass
+    x1 , y1 , x2 , y2 = boxes1.unbind(dim = 1)
+    x11 , y11 , x22 , y22 = boxes2.unbind(dim = 1)
+
+    M , N = boxes1.shape[0] , boxes2.shape[0]
+    b1 = boxes1.unsqueeze(dim = 1).repeat(1 , N , 1)
+    b2 = boxes2.unsqueeze(dim = 0).repeat(M , 1 , 1)
+
+    x1 = torch.max(b1[:,:,0] , b2[:,:,0])
+    y1 = torch.max(b1[:,:,1] , b2[:,:,1])
+    x2 = torch.min(b1[:,:,2] , b2[:,:,2])
+    y2 = torch.min(b1[:,:,3] , b2[:,:,3])
+
+    inner_area = (x2 - x1).clamp(min=0) * (y2 - y1).clamp(min=0)
+    b1_area = (b1[:,:,2] - b1[:,:,0]) * (b1[:,:,3] - b1[:,:,1])
+    b2_area = (b2[:,:,2] - b2[:,:,0]) * (b2[:,:,3] - b2[:,:,1])
+
+    union_area = b1_area + b2_area - inner_area
+    iou = inner_area / union_area
+
+
     ##########################################################################
     #                             END OF YOUR CODE                           #
     ##########################################################################

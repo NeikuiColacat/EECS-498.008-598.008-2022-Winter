@@ -11,4 +11,4 @@ This is my implementation of the assignments for EECS 598 in Winter 2022.
 
 The first three assignments are similar each year, while the last three vary with the changes in the course from year to year.
 
-For example , the transformer is added in 2022 winter,and the missing `pytorch_autograd_and_nn.py` is added in A42020fall folder, which would walk you throung the basic usage of autograd and nn.module.
+For example , the transformer is added in 2022 winter, and the missing `pytorch_autograd_and_nn.py` is added in A42020fall folder, which would walk you throung the basic usage of autograd and nn.module.
